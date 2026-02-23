@@ -3,82 +3,7 @@ import gzip
 import time
 import random
 from collections import deque
-
-class PrunedLandmarkLabeling:
-    def __init__(self, graph):
-        # graph is adjacency list of [v: [neighbours]]
-        self.graph = graph
-        self.n = len(graph)
-        self.vertex_order = list(range(self.n))
-        
-        # Degree sorting strategy
-        self.vertex_order.sort(key=lambda v: len(graph[v]), reverse=True)
-        # tuple of (vertex, dist)
-        self.L = [[] for _ in range(self.n)]
-        
-        
-    def build_index(self):
-        P = [float('inf') for _ in range(self.n)]
-        for rank, v in enumerate(self.vertex_order):
-            self.pruned_bfs(v, rank, P)    
-        
-    
-    def pruned_bfs(self, v, rank_v, P):
-        queue = deque([(v, 0)])
-        visited = [v]
-        
-        T = [float('inf') for _ in range(self.n)]
-        for w, dist in self.L[v]:
-            T[w] = dist
-        T[rank_v] = 0
-        P[v] = 0
-        
-        while len(queue) > 0:
-            u, cur_dist = queue.popleft()
-            min_query_dist = float('inf')
-            for w, dist in self.L[u]:
-                min_query_dist = min(min_query_dist, dist + T[w])
-                
-            if min_query_dist <= cur_dist:
-                continue
-            
-            self.L[u].append((rank_v, cur_dist))
-            
-            for w in self.graph[u]:
-                if P[w] == float('inf'):
-                    P[w] = P[u] + 1
-                    queue.append((w, cur_dist + 1))
-                    visited.append(w)
-                    
-        for w in visited:
-            P[w] = float('inf')
-         
-            
-    def query(self, u, v):
-        if u >= self.n or v >= self.n:
-            return float('inf')
-        
-        L_u = self.L[u]
-        L_v = self.L[v]
-        
-        i = 0
-        j = 0
-        min_dist = float('inf')
-        
-        while i < len(L_u) and j < len(L_v):
-            hub_u, dist_u = L_u[i]
-            hub_v, dist_v = L_v[j]
-            
-            if hub_u > hub_v:
-                j += 1
-            elif hub_v > hub_u:
-                i += 1
-            else:
-                min_dist = min(min_dist, dist_u + dist_v)
-                i += 1
-                j += 1
-                
-        return min_dist
+from pll import PrunedLandmarkLabeling
 
 
 def load_snap_dataset(url):
@@ -123,6 +48,27 @@ def load_snap_dataset(url):
     print(f"Loaded graph with {n} nodes and {len(edges)} edges.")
     return graph
 
+def verify_distance_bfs(graph, start, target):
+    """A standard, brute-force BFS to serve as the ground truth."""
+    if start == target:
+        return 0
+        
+    queue = deque([(start, 0)])
+    visited = {start}
+    
+    while queue:
+        current, dist = queue.popleft()
+        
+        for neighbor in graph[current]:
+            if neighbor == target:
+                return dist + 1
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, dist + 1))
+                
+    return float('inf') # No path exists
+
+
 if __name__ == "__main__":
     # URL for p2p-Gnutella08 (Smaller dataset: ~6,300 nodes, ~20,000 edges)
     # For the larger 62,000 node dataset, use: 
@@ -146,13 +92,23 @@ if __name__ == "__main__":
     print(f"Average label size: {avg_label_size:.2f} entries per node.")
     
     # Run 5 random distance queries
-    print("\nRunning random queries:")
+    print("\nRunning random queries and verifying...")
     for _ in range(5):
         u = random.randint(0, pll.n - 1)
         v = random.randint(0, pll.n - 1)
         
+        # Get answer from PLL index
         query_start = time.time()
-        distance = pll.query(u, v)
-        query_time = (time.time() - query_start) * 1000000 # convert to microseconds
+        pll_distance = pll.query(u, v)
+        query_time = (time.time() - query_start) * 1000000 
         
-        print(f"Distance between {u} and {v}: {distance} (took {query_time:.2f} µs)")
+        # Get answer from brute force BFS
+        brute_force_start = time.time()
+        bfs_distance = verify_distance_bfs(graph, u, v)
+        brute_force_time = (time.time() - brute_force_start) * 1000000 
+        
+        # Check answer
+        status = "PASS" if pll_distance == bfs_distance else "FAIL"
+        
+        print(f"[{status}] Dist({u}, {v}) = {pll_distance} (PLL took {query_time:.2f} µs)")
+        print(f"Brute force BFS took {brute_force_time:.2f} µs")
